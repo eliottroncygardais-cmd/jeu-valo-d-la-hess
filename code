@@ -1,0 +1,780 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FPS ARENA</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#080b12;color:white;
+ font-family:Arial,sans-serif;overflow:hidden
+}
+canvas{display:block;width:100vw;height:100vh}
+
+#menu{
+ position:fixed;inset:0;z-index:5;
+ display:flex;flex-direction:column;
+ align-items:center;justify-content:center;
+ padding:20px;text-align:center;
+ background:linear-gradient(135deg,#080b12,#172338)
+}
+h1{color:#ff414d;font-size:50px;letter-spacing:8px}
+h2{letter-spacing:3px}
+
+.characters{
+ display:flex;flex-wrap:wrap;
+ justify-content:center;gap:12px;margin:20px
+}
+.character{
+ width:135px;min-height:135px;padding:15px 8px;
+ display:flex;flex-direction:column;
+ align-items:center;gap:10px;
+ color:white;background:#172338;
+ border:2px solid #35445d;
+ border-radius:12px;cursor:pointer
+}
+.character span{font-size:35px}
+.character small{color:#bbb}
+.character.selected,.character:hover{
+ border-color:#ff414d;background:#30364a
+}
+#play{
+ background:#ff414d;color:white;border:0;
+ padding:15px 40px;border-radius:7px;
+ font-size:18px;font-weight:bold;cursor:pointer
+}
+
+#hud{position:fixed;inset:0;pointer-events:none}
+#hud[hidden],#menu[hidden]{display:none}
+#stats{
+ position:absolute;top:20px;left:20px;
+ background:#101722cc;padding:12px;line-height:1.7
+}
+#crosshair{
+ position:absolute;left:50%;top:50%;
+ transform:translate(-50%,-50%);font-size:27px
+}
+#ability{
+ position:absolute;bottom:30px;left:50%;
+ transform:translateX(-50%);
+ background:#101722cc;padding:12px
+}
+#help{
+ position:absolute;right:20px;bottom:15px;
+ text-align:right;font-size:12px;line-height:1.6
+}
+#message{
+ position:absolute;top:25%;width:100%;
+ text-align:center;font-size:30px;color:#ff414d
+}
+</style>
+</head>
+
+<body>
+
+<div id="menu">
+<h1>FPS ARENA</h1>
+<h2>CHOISIS TON PERSONNAGE</h2>
+<p>Choisis ton agent avant de commencer.</p>
+
+<div class="characters">
+
+<button class="character selected" data-agent="0">
+<span>⚔️</span><b>ASSAULT</b>
+<small>Aucun pouvoir</small>
+</button>
+
+<button class="character" data-agent="1">
+<span>💥</span><b>FLASH</b>
+<small>Aveugle les bots</small>
+</button>
+
+<button class="character" data-agent="2">
+<span>☁️</span><b>SMOKE</b>
+<small>Crée une fumée</small>
+</button>
+
+<button class="character" data-agent="3">
+<span>👁️</span><b>BLIND</b>
+<small>Immobilise les bots</small>
+</button>
+
+<button class="character" data-agent="4">
+<span>⚡</span><b>TELEPORT</b>
+<small>Se téléporte</small>
+</button>
+
+</div>
+
+<button id="play">JOUER</button>
+<p style="color:#888">FPS ARENA - VERSION 1.0</p>
+</div>
+
+<canvas id="game"></canvas>
+
+<div id="hud" hidden>
+<div id="stats">
+SCORE : <span id="score">0</span><br>
+BOTS RESTANTS : <span id="remaining">5</span><br>
+VIE : <span id="life">100</span>
+</div>
+
+<div id="crosshair">+</div>
+
+<div id="ability">
+POUVOIR : <span id="power">Aucun</span> [E]
+</div>
+
+<div id="help">
+ZQSD / WASD : Déplacement<br>
+Souris : Regarder<br>
+Clic gauche : Tirer<br>
+E : Pouvoir spécial<br>
+Échap : Libérer la souris
+</div>
+
+<div id="message"></div>
+</div>
+
+<script>
+
+const canvas=document.querySelector("#game");
+const ctx=canvas.getContext("2d");
+
+const menu=document.querySelector("#menu");
+const hud=document.querySelector("#hud");
+
+const agents=[
+ "Aucun",
+ "Flash grenade",
+ "Écran de fumée",
+ "Blind temporaire",
+ "Téléportation"
+];
+
+let selectedAgent=0;
+let playing=false;
+let score=0;
+let life=100;
+
+let yaw=0;
+let pitch=0;
+
+let player={x:0,y:0};
+let bots=[];
+let keys={};
+
+let lastShot=0;
+let smokeTime=0;
+let flashOverlay=0;
+let blindOverlay=0;
+
+let previousTime=performance.now();
+
+function resize(){
+ canvas.width=innerWidth;
+ canvas.height=innerHeight;
+}
+window.addEventListener("resize",resize);
+resize();
+
+// CHOIX DES PERSONNAGES
+
+document.querySelectorAll(".character").forEach(button=>{
+ button.addEventListener("click",()=>{
+  document.querySelector(".character.selected")
+   ?.classList.remove("selected");
+
+  button.classList.add("selected");
+  selectedAgent=Number(button.dataset.agent);
+ });
+});
+
+// DEMARRER LE JEU
+
+document.querySelector("#play").addEventListener("click",startGame);
+
+function startGame(){
+
+ score=0;
+ life=100;
+ yaw=0;
+ pitch=0;
+
+ player={x:0,y:0};
+
+ createBots();
+ updateHud();
+
+ document.querySelector("#power").textContent=agents[selectedAgent];
+
+ menu.hidden=true;
+ hud.hidden=false;
+
+ playing=true;
+
+ canvas.requestPointerLock?.();
+}
+
+// CREATION DES BOTS
+
+function createBots(){
+
+ bots=[];
+
+ for(let i=0;i<5;i++){
+
+  const angle=Math.random()*Math.PI*2;
+  const distance=9+Math.random()*8;
+
+  bots.push({
+   x:Math.cos(angle)*distance,
+   y:Math.sin(angle)*distance,
+   hp:100,
+   alive:true,
+   speed:0.5+Math.random()*0.35,
+   stunned:0,
+   attackCooldown:0
+  });
+
+ }
+}
+
+// COMMANDES
+
+document.addEventListener("keydown",e=>{
+
+ keys[e.key.toLowerCase()]=true;
+
+ if(e.key.toLowerCase()==="e"&&playing){
+  useAbility();
+ }
+
+});
+
+document.addEventListener("keyup",e=>{
+ keys[e.key.toLowerCase()]=false;
+});
+
+// SOURIS
+
+document.addEventListener("mousemove",e=>{
+
+ if(playing&&document.pointerLockElement===canvas){
+
+  yaw+=e.movementX*0.003;
+
+  pitch=Math.max(
+   -0.7,
+   Math.min(0.7,pitch-e.movementY*0.003)
+  );
+
+ }
+
+});
+
+// TIR
+
+canvas.addEventListener("click",()=>{
+
+ if(!playing)return;
+
+ if(document.pointerLockElement!==canvas){
+  canvas.requestPointerLock?.();
+  return;
+ }
+
+ shoot();
+
+});
+
+function shoot(){
+
+ const now=performance.now();
+
+ if(now-lastShot<250)return;
+
+ lastShot=now;
+
+ let target=null;
+ let bestAngle=0.10;
+
+ for(const bot of bots){
+
+  if(!bot.alive)continue;
+
+  const dx=bot.x-player.x;
+  const dy=bot.y-player.y;
+
+  const distance=Math.hypot(dx,dy);
+
+  let angle=Math.atan2(dy,dx)-yaw;
+
+  angle=Math.atan2(Math.sin(angle),Math.cos(angle));
+
+  const tolerance=Math.max(0.025,0.13/distance);
+
+  if(
+   distance<25&&
+   Math.abs(angle)<tolerance&&
+   Math.abs(angle)<bestAngle
+  ){
+
+   target=bot;
+   bestAngle=Math.abs(angle);
+
+  }
+
+ }
+
+ if(target){
+
+  target.hp-=50;
+
+  if(target.hp<=0){
+
+   target.alive=false;
+   score+=100;
+
+  }
+
+ }
+
+ updateHud();
+
+}
+
+// POUVOIRS SPECIAUX
+
+function useAbility(){
+
+ if(selectedAgent===0)return;
+
+ // FLASH
+
+ if(selectedAgent===1){
+
+  flashOverlay=0.45;
+
+  bots.forEach(bot=>{
+   if(bot.alive)bot.stunned=2.5;
+  });
+
+ }
+
+ // SMOKE
+
+ else if(selectedAgent===2){
+
+  smokeTime=6;
+
+ }
+
+ // BLIND
+
+ else if(selectedAgent===3){
+
+  blindOverlay=0.7;
+
+  bots.forEach(bot=>{
+   if(bot.alive)bot.stunned=4;
+  });
+
+ }
+
+ // TELEPORT
+
+ else if(selectedAgent===4){
+
+  player.x+=Math.cos(yaw)*5;
+  player.y+=Math.sin(yaw)*5;
+
+  player.x=clamp(player.x,-19,19);
+  player.y=clamp(player.y,-19,19);
+
+ }
+
+}
+
+function clamp(value,min,max){
+ return Math.max(min,Math.min(max,value));
+}
+
+// HUD
+
+function updateHud(){
+
+ document.querySelector("#score").textContent=score;
+
+ document.querySelector("#remaining").textContent=
+ bots.filter(bot=>bot.alive).length;
+
+ document.querySelector("#life").textContent=Math.max(0,life);
+
+}
+
+// MOUVEMENTS ET IA
+
+function update(dt){
+
+ if(!playing)return;
+
+ const forward=
+ (keys.z||keys.w?1:0)-(keys.s?1:0);
+
+ const side=
+ (keys.d?1:0)-(keys.q||keys.a?1:0);
+
+ const speed=5*dt;
+
+ player.x+=(
+  Math.cos(yaw)*forward-
+  Math.sin(yaw)*side
+ )*speed;
+
+ player.y+=(
+  Math.sin(yaw)*forward+
+  Math.cos(yaw)*side
+ )*speed;
+
+ player.x=clamp(player.x,-19,19);
+ player.y=clamp(player.y,-19,19);
+
+ for(const bot of bots){
+
+  if(!bot.alive)continue;
+
+  bot.stunned=Math.max(0,bot.stunned-dt);
+
+  bot.attackCooldown=Math.max(
+   0,bot.attackCooldown-dt
+  );
+
+  const dx=player.x-bot.x;
+  const dy=player.y-bot.y;
+
+  const distance=Math.hypot(dx,dy);
+
+  if(bot.stunned>0)continue;
+
+  if(distance>1.5){
+
+   bot.x+=(dx/distance)*bot.speed*dt;
+   bot.y+=(dy/distance)*bot.speed*dt;
+
+  }
+
+  else if(bot.attackCooldown<=0){
+
+   life-=5;
+   bot.attackCooldown=1.5;
+
+   updateHud();
+
+  }
+
+ }
+
+ smokeTime=Math.max(0,smokeTime-dt);
+ flashOverlay=Math.max(0,flashOverlay-dt);
+ blindOverlay=Math.max(0,blindOverlay-dt);
+
+ if(life<=0){
+  endGame("TU AS PERDU !");
+ }
+
+ else if(bots.every(bot=>!bot.alive)){
+  endGame("VICTOIRE !");
+ }
+
+}
+
+// FIN DE PARTIE
+
+function endGame(message){
+
+ playing=false;
+
+ document.exitPointerLock?.();
+
+ document.querySelector("#message").textContent=
+ message+" SCORE : "+score;
+
+ setTimeout(()=>{
+
+  document.querySelector("#message").textContent="";
+
+  hud.hidden=true;
+  menu.hidden=false;
+
+ },2500);
+
+}
+
+// AFFICHAGE DU JEU
+
+function draw(){
+
+ const w=canvas.width;
+ const h=canvas.height;
+
+ const horizon=h/2+pitch*h*0.5;
+
+ ctx.clearRect(0,0,w,h);
+
+ // CIEL
+
+ const sky=ctx.createLinearGradient(0,0,0,horizon);
+
+ sky.addColorStop(0,"#172338");
+ sky.addColorStop(1,"#526477");
+
+ ctx.fillStyle=sky;
+ ctx.fillRect(0,0,w,horizon);
+
+ // SOL
+
+ const ground=ctx.createLinearGradient(0,horizon,0,h);
+
+ ground.addColorStop(0,"#555b60");
+ ground.addColorStop(1,"#171b21");
+
+ ctx.fillStyle=ground;
+ ctx.fillRect(0,horizon,w,h-horizon);
+
+ // GRILLE
+
+ ctx.strokeStyle="#89939b44";
+
+ for(let i=1;i<14;i++){
+
+  const y=horizon+(h-horizon)*i/14;
+
+  ctx.beginPath();
+  ctx.moveTo(0,y);
+  ctx.lineTo(w,y);
+  ctx.stroke();
+
+ }
+
+ // MURS
+
+ ctx.fillStyle="#313c4c";
+ ctx.fillRect(0,horizon-70,w,70);
+
+ ctx.strokeStyle="#718096";
+
+ for(let x=0;x<w;x+=100){
+  ctx.strokeRect(x,horizon-70,100,70);
+ }
+
+ // BOTS
+
+ const visibleBots=bots.map(bot=>{
+
+  const dx=bot.x-player.x;
+  const dy=bot.y-player.y;
+
+  const distance=Math.hypot(dx,dy);
+
+  let angle=Math.atan2(dy,dx)-yaw;
+
+  angle=Math.atan2(Math.sin(angle),Math.cos(angle));
+
+  return {bot,distance,angle};
+
+ }).filter(item=>
+  item.bot.alive&&
+  Math.abs(item.angle)<1.2&&
+  item.distance>0.4
+ ).sort((a,b)=>b.distance-a.distance);
+
+ for(const item of visibleBots){
+
+  const {bot,distance,angle}=item;
+
+  const x=w/2+Math.tan(angle)*(w*0.65);
+
+  const size=Math.min(h*0.65,h*1.5/distance);
+
+  const y=horizon-size*0.45;
+
+  // OMBRE
+
+  ctx.fillStyle="#0008";
+
+  ctx.beginPath();
+
+  ctx.ellipse(
+   x,y+size*0.94,
+   size*0.35,size*0.07,
+   0,0,Math.PI*2
+  );
+
+  ctx.fill();
+
+  // CORPS
+
+  ctx.fillStyle=bot.stunned>0?"#777":"#bd3944";
+
+  ctx.fillRect(
+   x-size*0.22,
+   y+size*0.32,
+   size*0.44,
+   size*0.55
+  );
+
+  // TETE
+
+  ctx.fillStyle="#e1bba4";
+
+  ctx.beginPath();
+
+  ctx.arc(
+   x,y+size*0.20,
+   size*0.16,
+   0,Math.PI*2
+  );
+
+  ctx.fill();
+
+  // CASQUE
+
+  ctx.fillStyle="#202b3d";
+
+  ctx.fillRect(
+   x-size*0.18,
+   y+size*0.04,
+   size*0.36,
+   size*0.09
+  );
+
+  // ARME DU BOT
+
+  ctx.fillStyle="#161a20";
+
+  ctx.fillRect(
+   x+size*0.12,
+   y+size*0.48,
+   size*0.28,
+   size*0.09
+  );
+
+  // BARRE DE VIE
+
+  ctx.fillStyle="#222";
+
+  ctx.fillRect(
+   x-size*0.25,
+   y-size*0.08,
+   size*0.5,
+   6
+  );
+
+  ctx.fillStyle="#4bdf78";
+
+  ctx.fillRect(
+   x-size*0.25,
+   y-size*0.08,
+   size*0.5*Math.max(0,bot.hp)/100,
+   6
+  );
+
+ }
+
+ // FUMEE
+
+ if(smokeTime>0){
+
+  ctx.fillStyle="#aeb5c466";
+
+  for(const [x,y,r] of [
+   [.72,.57,110],
+   [.65,.60,130],
+   [.8,.59,100]
+  ]){
+
+   ctx.beginPath();
+   ctx.arc(w*x,h*y,r,0,Math.PI*2);
+   ctx.fill();
+
+  }
+
+ }
+
+ // ARME DU JOUEUR
+
+ ctx.fillStyle="#171d27";
+ ctx.fillRect(w*.57,h*.78,w*.16,h*.22);
+
+ ctx.fillStyle="#404c5c";
+ ctx.fillRect(w*.60,h*.75,w*.10,h*.13);
+
+ ctx.fillStyle="#111820";
+ ctx.fillRect(w*.63,h*.68,w*.035,h*.16);
+
+ // EFFETS VISUELS
+
+ if(flashOverlay>0||blindOverlay>0){
+
+  ctx.fillStyle="#fff";
+
+  ctx.globalAlpha=Math.min(
+   .9,flashOverlay+blindOverlay
+  );
+
+  ctx.fillRect(0,0,w,h);
+
+  ctx.globalAlpha=1;
+
+ }
+
+ // VISEUR
+
+ ctx.strokeStyle="white";
+ ctx.lineWidth=2;
+
+ ctx.beginPath();
+
+ ctx.moveTo(w/2-12,h/2);
+ ctx.lineTo(w/2-4,h/2);
+
+ ctx.moveTo(w/2+4,h/2);
+ ctx.lineTo(w/2+12,h/2);
+
+ ctx.moveTo(w/2,h/2-12);
+ ctx.lineTo(w/2,h/2-4);
+
+ ctx.moveTo(w/2,h/2+4);
+ ctx.lineTo(w/2,h/2+12);
+
+ ctx.stroke();
+
+}
+
+// BOUCLE PRINCIPALE
+
+function loop(now){
+
+ const dt=Math.min(
+  (now-previousTime)/1000,
+  .05
+ );
+
+ previousTime=now;
+
+ update(dt);
+ draw();
+
+ requestAnimationFrame(loop);
+
+}
+
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
